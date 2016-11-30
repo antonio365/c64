@@ -203,7 +203,10 @@ def compare_output():
 	global OPCODES
 	for op in OPCODES:
 		for mode, v in op.modes.items():
-			for _ in range(1 if type(v) is not list else len(v)):
+			for i in range(1 if type(v) is not list else len(v)):
+				# the only non-mnemonic alias
+				if op.mnemonic == "LAX" and mode == "#":
+					continue
 				yield "{} {}".format(op.mnemonic, {
 					"abs": "a",
 					"abs,x": "a,x",
@@ -229,7 +232,6 @@ def main():
 		"ind", "_", "#", "a", "abs", "abs,x", "abs,y",
 		"zp", "zp,x", "zp,y", "iz,x", "iz,y", "r"
 	) for x in op.modes.keys()) for op in OPCODES]))
-	opc_list = sorted(compare_output())
 	for x in range(256):
 		found = False
 		for op in OPCODES:
@@ -240,61 +242,63 @@ def main():
 			if found:
 				break
 		assert(found)
+	check = sorted([
+		"BRK s",     "ORA (z,x)", "JAM i",     "SLO (z,x)", "NOP z",
+		"ORA z",     "ASL z",     "SLO z",     "BPL r",     "ORA (z),y",
+		"JAM i",     "SLO (z),y", "NOP z,x",   "ORA z,x",   "ASL z,x",
+		"SLO z,x",   "JSR a",     "AND (z,x)", "JAM i",     "RLA (z,x)",
+		"BIT z",     "AND z",     "ROL z",     "RLA z",     "BMI r",
+		"AND (z),y", "JAM i",     "RLA (z),y", "NOP z,x",   "AND z,x",
+		"ROL z,x",   "RLA z,x",   "RTI s",     "EOR (z,x)", "JAM i",
+		"SRE (z,x)", "NOP z",     "EOR z",     "LSR z",     "SRE z",
+		"BVC r",     "EOR (z),y", "JAM i",     "SRE (z),y", "NOP z,x",
+		"EOR z,x",   "LSR z,x",   "SRE z,x",   "RTS s",     "ADC (z,x)",
+		"JAM i",     "RRA (z,x)", "NOP z",     "ADC z",     "ROR z",
+		"RRA z",     "BVS r",     "ADC (z),y", "JAM i",     "RRA (z),y",
+		"NOP z,x",   "ADC z,x",   "ROR z,x",   "RRA z,x",   "NOP #",
+		"STA (z,x)", "NOP #",     "SAX (z,x)", "STY z",     "STA z",
+		"STX z",     "SAX z",     "BCC r",     "STA (z),y", "JAM i",
+		"SHA a,x",   "STY z,x",   "STA z,x",   "STX z,y",   "SAX z,y",
+		"LDY #",     "LDA (z,x)", "LDX #",     "LAX (z,x)", "LDY z",
+		"LDA z",     "LDX z",     "LAX z",     "BCS r",     "LDA (z),y",
+		"JAM i",     "LAX (z),y", "LDY z,x",   "LDA z,x",   "LDX z,y",
+		"LAX z,y",   "CPY #",     "CMP (z,x)", "NOP #",     "DCP (z,x)",
+		"CPY z",     "CMP z",     "DEC z",     "DCP z",     "BNE r",
+		"CMP (z),y", "JAM i",     "DCP (z),y", "NOP z,x",   "CMP z,x",
+		"DEC z,x",   "DCP z,x",   "CPX #",     "SBC (z,x)", "NOP #",
+		"ISB (z,x)", "CPX z",     "SBC z",     "INC z",     "ISB z",
+		"BEQ r",     "SBC (z),y", "JAM i",     "ISB (z),y", "NOP z,x",
+		"SBC z,x",   "INC z,x",   "ISB z,x",   "PHP s",     "ORA #",
+		"ASL A",     "ANC #",     "NOP a",     "ORA a",     "ASL a",
+		"SLO a",     "CLC i",     "ORA a,y",   "NOP i",     "SLO a,y",
+		"NOP a,x",   "ORA a,x",   "ASL a,x",   "SLO a,x",   "PLP s",
+		"AND #",     "ROL A",     "ANC #",     "BIT a",     "AND a",
+		"ROL a",     "RLA a",     "SEC i",     "AND a,y",   "NOP i",
+		"RLA a,y",   "NOP a,x",   "AND a,x",   "ROL a,x",   "RLA a,x",
+		"PHA s",     "EOR #",     "LSR A",     "ASR #",     "JMP a",
+		"EOR a",     "LSR a",     "SRE a",     "CLI i",     "EOR a,y",
+		"NOP i",     "SRE a,y",   "NOP a,x",   "EOR a,x",   "LSR a,x",
+		"SRE a,x",   "PLA s",     "ADC #",     "ROR A",     "ARR #",
+		"JMP (a)",   "ADC a",     "ROR a",     "RRA a",     "SEI i",
+		"ADC a,y",   "NOP i",     "RRA a,y",   "NOP a,x",   "ADC a,x",
+		"ROR a,x",   "RRA a,x",   "DEY i",     "NOP #",     "TXA i",
+		"ANE #",     "STY a",     "STA a",     "STX a",     "SAX a",
+		"TYA i",     "STA a,y",   "TXS i",     "SHS a,x",   "SHY a,y",
+		"STA a,x",   "SHX a,y",   "SHA a,y",   "TAY i",     "LDA #",
+		"TAX i",     "LXA #",     "LDY a",     "LDA a",     "LDX a",
+		"LAX a",     "CLV i",     "LDA a,y",   "TSX i",     "LAE a,y",
+		"LDY a,x",   "LDA a,x",   "LDX a,y",   "LAX a,y",   "INY i",
+		"CMP #",     "DEX i",     "SBX #",     "CPY a",     "CMP a",
+		"DEC a",     "DCP a",     "CLD i",     "CMP a,y",   "NOP i",
+		"DCP a,y",   "NOP a,x",   "CMP a,x",   "DEC a,x",   "DCP a,x",
+		"INX i",     "SBC #",     "NOP i",     "SBC #",     "CPX a",
+		"SBC a",     "INC a",     "ISB a",     "SED i",     "SBC a,y",
+		"NOP i",     "ISB a,y",   "NOP a,x",   "SBC a,x",   "INC a,x",
+		"ISB a,x"
+	])
+	opc_list = sorted(compare_output())
 	for x in range(256):
-		assert(opc_list[x] == sorted([
-			"BRK s",     "ORA (z,x)", "JAM i",     "SLO (z,x)", "NOP z",
-			"ORA z",     "ASL z",     "SLO z",     "BPL r",     "ORA (z),y",
-			"JAM i",     "SLO (z),y", "NOP z,x",   "ORA z,x",   "ASL z,x",
-			"SLO z,x",   "JSR a",     "AND (z,x)", "JAM i",     "RLA (z,x)",
-			"BIT z",     "AND z",     "ROL z",     "RLA z",     "BMI r",
-			"AND (z),y", "JAM i",     "RLA (z),y", "NOP z,x",   "AND z,x",
-			"ROL z,x",   "RLA z,x",   "RTI s",     "EOR (z,x)", "JAM i",
-			"SRE (z,x)", "NOP z",     "EOR z",     "LSR z",     "SRE z",
-			"BVC r",     "EOR (z),y", "JAM i",     "SRE (z),y", "NOP z,x",
-			"EOR z,x",   "LSR z,x",   "SRE z,x",   "RTS s",     "ADC (z,x)",
-			"JAM i",     "RRA (z,x)", "NOP z",     "ADC z",     "ROR z",
-			"RRA z",     "BVS r",     "ADC (z),y", "JAM i",     "RRA (z),y",
-			"NOP z,x",   "ADC z,x",   "ROR z,x",   "RRA z,x",   "NOP #",
-			"STA (z,x)", "NOP #",     "SAX (z,x)", "STY z",     "STA z",
-			"STX z",     "SAX z",     "BCC r",     "STA (z),y", "JAM i",
-			"SHA a,x",   "STY z,x",   "STA z,x",   "STX z,y",   "SAX z,y",
-			"LDY #",     "LDA (z,x)", "LDX #",     "LAX (z,x)", "LDY z",
-			"LDA z",     "LDX z",     "LAX z",     "BCS r",     "LDA (z),y",
-			"JAM i",     "LAX (z),y", "LDY z,x",   "LDA z,x",   "LDX z,y",
-			"LAX z,y",   "CPY #",     "CMP (z,x)", "NOP #",     "DCP (z,x)",
-			"CPY z",     "CMP z",     "DEC z",     "DCP z",     "BNE r",
-			"CMP (z),y", "JAM i",     "DCP (z),y", "NOP z,x",   "CMP z,x",
-			"DEC z,x",   "DCP z,x",   "CPX #",     "SBC (z,x)", "NOP #",
-			"ISB (z,x)", "CPX z",     "SBC z",     "INC z",     "ISB z",
-			"BEQ r",     "SBC (z),y", "JAM i",     "ISB (z),y", "NOP z,x",
-			"SBC z,x",   "INC z,x",   "ISB z,x",   "PHP s",     "ORA #",
-			"ASL A",     "ANC #",     "NOP a",     "ORA a",     "ASL a",
-			"SLO a",     "CLC i",     "ORA a,y",   "NOP i",     "SLO a,y",
-			"NOP a,x",   "ORA a,x",   "ASL a,x",   "SLO a,x",   "PLP s",
-			"AND #",     "ROL A",     "ANC #",     "BIT a",     "AND a",
-			"ROL a",     "RLA a",     "SEC i",     "AND a,y",   "NOP i",
-			"RLA a,y",   "NOP a,x",   "AND a,x",   "ROL a,x",   "RLA a,x",
-			"PHA s",     "EOR #",     "LSR A",     "ASR #",     "JMP a",
-			"EOR a",     "LSR a",     "SRE a",     "CLI i",     "EOR a,y",
-			"NOP i",     "SRE a,y",   "NOP a,x",   "EOR a,x",   "LSR a,x",
-			"SRE a,x",   "PLA s",     "ADC #",     "ROR A",     "ARR #",
-			"JMP (a)",   "ADC a",     "ROR a",     "RRA a",     "SEI i",
-			"ADC a,y",   "NOP i",     "RRA a,y",   "NOP a,x",   "ADC a,x",
-			"ROR a,x",   "RRA a,x",   "DEY i",     "NOP #",     "TXA i",
-			"ANE #",     "STY a",     "STA a",     "STX a",     "SAX a",
-			"TYA i",     "STA a,y",   "TXS i",     "SHS a,x",   "SHY a,y",
-			"STA a,x",   "SHX a,y",   "SHA a,y",   "TAY i",     "LDA #",
-			"TAX i",     "LXA #",     "LDY a",     "LDA a",     "LDX a",
-			"LAX a",     "CLV i",     "LDA a,y",   "TSX i",     "LAE a,y",
-			"LDY a,x",   "LDA a,x",   "LDX a,y",   "LAX a,y",   "INY i",
-			"CMP #",     "DEX i",     "SBX #",     "CPY a",     "CMP a",
-			"DEC a",     "DCP a",     "CLD i",     "CMP a,y",   "NOP i",
-			"DCP a,y",   "NOP a,x",   "CMP a,x",   "DEC a,x",   "DCP a,x",
-			"INX i",     "SBC #",     "NOP i",     "SBC #",     "CPX a",
-			"SBC a",     "INC a",     "ISB a",     "SED i",     "SBC a,y",
-			"NOP i",     "ISB a,y",   "NOP a,x",   "SBC a,x",   "INC a,x",
-			"ISB a,x"
-		])[x])
+		assert(opc_list[x] == check[x])
 
 
 

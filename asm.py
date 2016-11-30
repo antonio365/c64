@@ -8,20 +8,12 @@ lo = lambda x: x & 0xff
 hi = lambda x: (x >> 8) & 0xff
 
 
-def parse_num(s):
-	if s[0] == "$":
-		return int(s[1:], 16)
-	return int(s)
-
-
-def first_op(op, *args):
-	for arg in args:
-		if arg in op:
-			if type(op[arg]) is list:
-				return op[arg][0]
-			else:
-				return arg, op[arg]
-	raise ValueError("No op found", op, args)
+def first_or_self(op, *args):
+	for x in args:
+		if x in op:
+			x = op[x]
+			return x[0] if type(x) is list else x
+	raise ValueError("No such mode {} in {}".format(str(op), str(args)))
 
 
 class MOS6502Parser:
@@ -48,19 +40,25 @@ class MOS6502Parser:
 
 	def __init__(self, infh):
 		self.blocks = []
+		parse_offset = 0
 		for line in infh.readlines():
 			for cc in self.comment_chars:
 				comment = line.find(cc)
 				if comment >= 0:
 					line = line[:comment]
+			colon = line.find(":")
+			if colon >= 0:
+				# todo: remove label from beginning of line
+				label = 0
+				line = line[colon + 1:].strip()
 			line = line.split()
 			if not len(line):
 				continue
-			print(line)
 			if line[0].upper().startswith(".ORG"):
+				parse_offset = 0
 				assert(len(line) == 2)
 				self.blocks.append({
-					"org": parse_num(line[1]),
+					"org": self.parse_num(line[1]),
 					"data": bytearray(),
 				})
 				continue
@@ -76,32 +74,70 @@ class MOS6502Parser:
 			for mn, op in self.opcodes.items():
 				if line[0].upper().startswith(mn):
 					self.block_add(*self.parse_op(
-						op, line[1] if len(line) > 1 else None
+						op, line[1] if len(line) > 1 else None,
+						parse_offset
 					))
+					break
+			parse_offset = len(self.blocks[-1])
 
 	@staticmethod
-	def parse_op(op, arg):
+	def parse_num(arg, return_use_wide=False):
+		use_wide = False
+		num = None
+		if arg[0] == "$":
+			arg = arg[1:]
+			if len(arg) > 2:
+				use_wide = True
+			num = int(arg, 16)
+		elif arg is not None:
+			if arg[0] == "0":
+				use_wide = True
+			num = int(arg)
+		if return_use_wide:
+			return use_wide, num
+		return num
+
+	@staticmethod
+	def race(arg, op, shortmode, longmode):
+		use_wide, num = MOS6502Parser.parse_num(arg, True)
+		if shortmode in op and not (use_wide and longmode in op):
+			return first_or_self(op, shortmode), num
+		return first_or_self(op, longmode), lo(num), hi(num)
+
+	@staticmethod
+	def parse_op(op, arg, parse_offset):
+		flags = (
+			"NO_ARG", "A", "#", "(,X)", "(),Y", "()", ",X", ",Y", "USE_WIDE",
+		)
 		if arg is None:
-			return first_op(op, "_", "a")[1],
+			return first_or_self(op, "_", "a"),
+		elif arg.upper() == "A":
+			return first_or_self(op, "a"),
 		elif arg[0] == "#":
-			return first_op(op, "#")[1], parse_num(arg[1:])
-		elif arg[-2:] == ",x":
-			return first_op(op, "zp,x", "abs,x")[1], parse_num(arg[1:-3])
-		elif arg[0] == "(" and arg[-3:] == ",x)":
-			return first_op(op, "iz,x")[1], parse_num(arg[1:-3])
-		elif arg[0] == "(" and arg[-3:] == "),y":
-			return first_op(op, "iz,y")[1], parse_num(arg[1:-3])
-		elif arg[0] == "(" and arg[-1] == ")":
-			num = parse_num(arg[1:-3])
-			return first_op(op, "ind")[1], lo(num), hi(num)
-		num = parse_num(arg)
-		if num < 256 and len(arg) < 4:
-			mode = first_op(op, "zp", "abs")
-			if mode[0] == "zp":
-				return mode[1], num
-			else:
-				return mode[1], lo(num), hi(num)
-		return first_op(op, "abs")[1], lo(num), hi(num)
+			return first_or_self(op, "#"), MOS6502Parser.parse_num(arg[1:])
+		elif arg[0] == "(" and arg[-3:].upper() == ",X)":
+			return (
+				first_or_self(op, "iz,x"),
+				MOS6502Parser.parse_num(arg[1:-3])
+			)
+		elif arg[0] == "(" and arg[-3:].upper() == "),Y":
+			return (
+				first_or_self(op, "iz,y"),
+				MOS6502Parser.parse_num(arg[1:-3])
+			)
+		elif arg[0] == "(" and arg[-1].upper() == ")":
+			return (
+				first_or_self(op, "ind"),
+				MOS6502Parser.parse_num(arg[1:-1])
+			)
+		elif arg[-2:].upper() == ",X":
+			return MOS6502Parser.race(arg[:-2], op, "zp,x", "abs,x")
+		elif arg[-2:].upper() == ",Y":
+			return MOS6502Parser.race(arg[:-2], op, "zp,y", "abs,y")
+		if "r" in op:
+			# todo: relative address support, label support
+			raise NotImplementedError
+		return MOS6502Parser.race(arg[:-2], op, "zp", "abs")
 
 	def dump(self):
 		print("\n".join(str(line) for line in self.blocks))
