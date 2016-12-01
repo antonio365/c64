@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+#
+# Copyright (c) 2016, mar77i <mar77i at mar77i dot ch>
+#
+# This software may be modified and distributed under the terms
+# of the ISC license.  See the LICENSE file for details.
 
 from collections import namedtuple
 from sys import argv
@@ -6,7 +11,7 @@ from sys import argv
 Opcode = namedtuple("Opcode", ["mnemonic", "modes", "alias"])
 Opcode.__new__.__defaults__ = ([], )
 
-# _: implied / no argument
+# _: implied/stack, no argument
 # a: accumulator
 # #: immediate
 # zp: zeropage
