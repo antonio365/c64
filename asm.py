@@ -13,14 +13,6 @@ lo = lambda x: x & 0xff
 hi = lambda x: (x >> 8) & 0xff
 
 
-def first_or_self(op, *args):
-    for x in args:
-        if x in op:
-            x = op[x]
-            return x[0] if type(x) is list else x
-    raise ValueError("No such mode {} in {}".format(str(op), str(args)))
-
-
 class MOS6502Parser:
     comment_chars = (";", )
     opcodes = dict()
@@ -46,6 +38,7 @@ class MOS6502Parser:
         self.blocks = []
         self.labels = {}
         self.forward_labels = {}
+        self.parse_offset = 0
         for line in infh.readlines():
             for cc in self.comment_chars:
                 comment = line.find(cc)
@@ -63,32 +56,53 @@ class MOS6502Parser:
                         self.blocks[b]["data"][pos + 1] = \
                             len(self.blocks[b]["data"]) - pos - 2
             line = line.split()
-            if not len(line):
-                continue
-            if line[0].upper().startswith(".ORG"):
-                assert(len(line) == 2)
-                self.blocks.append({
-                    "org": self.parse_num(line[1]),
-                    "data": bytearray(),
-                })
-                continue
-            if line[0].upper().startswith(".HEX"):
-                for x in line[1:]:
-                    num = int(x[-4:], 16)
-                    if len(x) > 2:
-                        self.block_add(lo(num))
-                        num >>= 8
-                    self.block_add(num)
-                continue
-            assert(len(line) in (1, 2))
-            for mn, op in self.opcodes.items():
-                if line[0].upper().startswith(mn):
-                    data = self.parse_op(
-                        op, line[1] if len(line) > 1 else None,
-                        len(self.blocks[-1]["data"])
-                    )
-                    self.block_add(*data)
-                    break
+            if len(line) > 0:
+                self.interpret(line)
+
+    def interpret(self, line):
+        if line[0].upper().startswith(".ORG"):
+            assert(len(line) == 2)
+            self.blocks.append({
+                "org": self.parse_num(line[1]),
+                "data": bytearray(),
+            })
+            return
+        elif line[0].upper().startswith(".HEX"):
+            for x in line[1:]:
+                num = int(x[-4:], 16)
+                if len(x) > 2:
+                    self.block_add(lo(num))
+                    num >>= 8
+                self.block_add(num)
+            return
+        assert(len(line) in (1, 2))
+        self.parse_offset = len(self.blocks[-1]["data"])
+        for mn, op in self.opcodes.items():
+            if line[0].upper().startswith(mn):
+                data = self.parse_op(op, line[1] if len(line) > 1 else None)
+                self.block_add(*data)
+                return
+
+    def parse_op(self, op, arg):
+        if arg is None:
+            return self.op_match(op, "_", "a"),
+        elif arg.upper() == "A":
+            return self.op_match(op, "a"),
+        elif arg[0] == "#":
+            return self.op_match(op, "#"), self.parse_num(arg[1:])
+        elif arg[0] == "(" and arg[-3:].upper() == ",X)":
+            return (self.op_match(op, "iz,x"), self.parse_num(arg[1:-3]))
+        elif arg[0] == "(" and arg[-3:].upper() == "),Y":
+            return (self.op_match(op, "iz,y"), self.parse_num(arg[1:-3]))
+        elif arg[0] == "(" and arg[-1].upper() == ")":
+            return (self.op_match(op, "ind"), self.parse_num(arg[1:-1]))
+        elif arg[-2:].upper() == ",X":
+            return self.op_by_argwidth(arg[:-2], op, "zp,x", "abs,x")
+        elif arg[-2:].upper() == ",Y":
+            return self.op_by_argwidth(arg[:-2], op, "zp,y", "abs,y")
+        if "r" in op:
+            return op["r"], self.relative(arg)
+        return self.op_by_argwidth(arg, op, "zp", "abs")
 
     @staticmethod
     def parse_num(arg, return_use_wide=False):
@@ -100,63 +114,44 @@ class MOS6502Parser:
                 use_wide = True
             num = int(arg, 16)
         elif arg is not None:
-            if arg[0] == "0":
+            if arg[0] == "0" and len(arg) > 1:
                 use_wide = True
             num = int(arg)
         if return_use_wide:
             return use_wide, num
         return num
 
+    @staticmethod
+    def op_match(op, *args):
+        for x in args:
+            if x in op:
+                x = op[x]
+                return x[0] if type(x) is list else x
+        raise ValueError("No such mode {} in {}".format(str(op), str(args)))
+
     @classmethod
-    def race(cls, arg, op, shortmode, longmode):
+    def op_by_argwidth(cls, arg, op, shortmode, longmode):
         use_wide, num = cls.parse_num(arg, True)
         if shortmode in op and not (use_wide and longmode in op):
-            return first_or_self(op, shortmode), num
-        return first_or_self(op, longmode), lo(num), hi(num)
+            return self.op_match(op, shortmode), num
+        return cls.op_match(op, longmode), lo(num), hi(num)
 
-    def parse_op(self, op, arg, parse_offset):
-        if arg is None:
-            return first_or_self(op, "_", "a"),
-        elif arg.upper() == "A":
-            return first_or_self(op, "a"),
-        elif arg[0] == "#":
-            return first_or_self(op, "#"), self.parse_num(arg[1:])
-        elif arg[0] == "(" and arg[-3:].upper() == ",X)":
-            return (
-                first_or_self(op, "iz,x"),
-                self.parse_num(arg[1:-3])
-            )
-        elif arg[0] == "(" and arg[-3:].upper() == "),Y":
-            return (
-                first_or_self(op, "iz,y"),
-                self.parse_num(arg[1:-3])
-            )
-        elif arg[0] == "(" and arg[-1].upper() == ")":
-            return (
-                first_or_self(op, "ind"),
-                self.parse_num(arg[1:-1])
-            )
-        elif arg[-2:].upper() == ",X":
-            return self.race(arg[:-2], op, "zp,x", "abs,x")
-        elif arg[-2:].upper() == ",Y":
-            return self.race(arg[:-2], op, "zp,y", "abs,y")
-        if "r" in op:
-            jtgt = 0
-            if arg in self.labels:
-                jtgt = self.labels[arg] - parse_offset
-            else:
-                try:
-                    jtgt = self.blocks[-1].get("org", 0) + self.parse_num(arg)
-                except ValueError:
-                    jtgt = 2
-                    if arg not in self.forward_labels:
-                        self.forward_labels[arg] = []
-                    self.forward_labels[arg].append((
-                        len(self.blocks) - 1,
-                        parse_offset,
-                    ))
-            return op["r"], lo(jtgt - 2)
-        return self.race(arg, op, "zp", "abs")
+    def relative(self, arg):
+        jtgt = 0
+        if arg in self.labels:
+            jtgt = self.labels[arg] - self.parse_offset
+        else:
+            try:
+                jtgt = self.blocks[-1].get("org", 0) + self.parse_num(arg)
+            except ValueError:
+                jtgt = 2
+                if arg not in self.forward_labels:
+                    self.forward_labels[arg] = []
+                self.forward_labels[arg].append((
+                    len(self.blocks) - 1,
+                    self.parse_offset,
+                ))
+        return lo(jtgt - 2)
 
     def write(self, fh):
         org = None
@@ -176,13 +171,12 @@ class MOS6502Parser:
             current = org
         self.blocks = sorted(self.blocks, key=lambda block: block["org"])
         for i, block in enumerate(self.blocks):
+            assert(self.blocks[i]["org"] >= current)
+            # add padding between blocks
+            if self.blocks[i]["org"] > current:
+                fh.write(b"\0" * (self.blocks[i]["org"] - current))
             fh.write(block["data"])
             current += len(block["data"])
-            if i + 1 < len(self.blocks):
-                assert(self.blocks[i + 1]["org"] >= current)
-                # add padding between blocks
-                if self.blocks[i + 1]["org"] > current:
-                    fh.write(b"\0" * (self.blocks[i + 1]["org"] - current))
 
 
 def main():
