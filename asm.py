@@ -79,30 +79,32 @@ class MOS6502Parser:
         self.parse_offset = len(self.blocks[-1]["data"])
         for mn, op in self.opcodes.items():
             if line[0].upper().startswith(mn):
-                data = self.parse_op(op, line[1] if len(line) > 1 else None)
-                self.block_add(*data)
+                self.block_add(*self.parse_op(
+                    line[0].upper(), op, line[1] if len(line) > 1 else None
+                ))
                 return
 
-    def parse_op(self, op, arg):
+    def parse_op(self, op, modes, arg):
+        assert(len(op) == 3)
         if arg is None:
-            return self.op_match(op, "_", "a"),
+            return self.match_mode(modes, "_", "a"),
         elif arg.upper() == "A":
-            return self.op_match(op, "a"),
+            return self.match_mode(modes, "a"),
         elif arg[0] == "#":
-            return self.op_match(op, "#"), self.parse_num(arg[1:])
+            return self.match_mode(modes, "#"), self.parse_num(arg[1:])
         elif arg[0] == "(" and arg[-3:].upper() == ",X)":
-            return (self.op_match(op, "iz,x"), self.parse_num(arg[1:-3]))
+            return (self.match_mode(modes, "iz,x"), self.parse_num(arg[1:-3]))
         elif arg[0] == "(" and arg[-3:].upper() == "),Y":
-            return (self.op_match(op, "iz,y"), self.parse_num(arg[1:-3]))
+            return (self.match_mode(modes, "iz,y"), self.parse_num(arg[1:-3]))
         elif arg[0] == "(" and arg[-1].upper() == ")":
-            return (self.op_match(op, "ind"), self.parse_num(arg[1:-1]))
+            return (self.match_mode(modes, "ind"), self.parse_num(arg[1:-1]))
         elif arg[-2:].upper() == ",X":
-            return self.op_by_argwidth(arg[:-2], op, "zp,x", "abs,x")
+            return self.mode_by_argwidth(arg[:-2], modes, "zp,x", "abs,x")
         elif arg[-2:].upper() == ",Y":
-            return self.op_by_argwidth(arg[:-2], op, "zp,y", "abs,y")
-        if "r" in op:
-            return op["r"], self.relative(arg)
-        return self.op_by_argwidth(arg, op, "zp", "abs")
+            return self.mode_by_argwidth(arg[:-2], modes, "zp,y", "abs,y")
+        if "r" in modes:
+            return modes["r"], self.relative(arg)
+        return self.mode_by_argwidth(arg, modes, "zp", "abs")
 
     @staticmethod
     def parse_num(arg, return_use_wide=False):
@@ -122,19 +124,19 @@ class MOS6502Parser:
         return num
 
     @staticmethod
-    def op_match(op, *args):
+    def match_mode(modes, *args):
         for x in args:
-            if x in op:
-                x = op[x]
+            if x in modes:
+                x = modes[x]
                 return x[0] if type(x) is list else x
-        raise ValueError("No such mode {} in {}".format(str(op), str(args)))
+        raise ValueError("No such mode {} in {}".format(str(modes), str(args)))
 
     @classmethod
-    def op_by_argwidth(cls, arg, op, shortmode, longmode):
+    def mode_by_argwidth(cls, arg, modes, shortmode, longmode):
         use_wide, num = cls.parse_num(arg, True)
-        if shortmode in op and not (use_wide and longmode in op):
-            return self.op_match(op, shortmode), num
-        return cls.op_match(op, longmode), lo(num), hi(num)
+        if shortmode in modes and not (use_wide and longmode in modes):
+            return self.match_mode(modes, shortmode), num
+        return cls.match_mode(modes, longmode), lo(num), hi(num)
 
     def relative(self, arg):
         jtgt = 0
