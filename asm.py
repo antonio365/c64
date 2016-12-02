@@ -162,14 +162,6 @@ class Instruction:
 class MOS6502Parser:
     comment_chars = (";", )
 
-    def block_add(self, *args):
-        if len(self.blocks) == 0:
-            self.blocks.append({
-                "data": bytearray(),
-            })
-        for arg in args:
-            self.blocks[-1]["data"].append(arg)
-
     def __init__(self, infh, warn_illegal):
         self.warn_illegal = warn_illegal
         self.blocks = []
@@ -218,20 +210,19 @@ class MOS6502Parser:
             for x in line[1:]:
                 num = int(x[-4:], 16)
                 if len(x) > 2:
-                    self.block_add(lo(num))
+                    self.blocks[-1]["data"].append(lo(num))
                     num >>= 8
-                self.block_add(num)
+                self.blocks[-1]["data"].append(num)
             return
         assert(len(line) in (1, 2))
         for op in OPCODES:
             if line[0].upper().startswith(op.mnemonic):
                 inst = Instruction(
                     self, line[0], op, line[1] if len(line) > 1 else None
-                )
-                inst = inst.parse()
+                ).parse()
                 if self.warn_illegal and is_illegal(inst[0]):
                     warn("illegal opcode: {}[{:02X}]", line[0], inst[0])
-                self.block_add(*inst)
+                self.blocks[-1]["data"].extend(*inst)
                 return
 
     def write(self, fh):
