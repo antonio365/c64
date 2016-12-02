@@ -8,14 +8,15 @@
 from collections import namedtuple
 from sys import argv
 
-Opcode = namedtuple("Opcode", ["mnemonic", "modes", "alias"])
+Opcode = namedtuple("Opcode", ["mnemonic", "modes", "aliases"])
 Opcode.__new__.__defaults__ = ([], )
 
 # _: implied/stack, no argument
 # a: accumulator
 # #: immediate
 # zp: zeropage
-# zx: zeropage,x
+# zp,x: zeropage,x
+# zp,y: zeropage,y
 # abs: absolute
 # abs,x: absolute,x
 # abs,y: absolute,y
@@ -23,6 +24,23 @@ Opcode.__new__.__defaults__ = ([], )
 # iz,y: (indexed),y
 # ind: (absolute indirect)
 # r: relative
+
+INSTRUCTION_LENGTH = {
+    "_": 1,
+    "a": 1,
+    "#": 2,
+    "zp": 2,
+    "zp,x": 2,
+    "zp,y": 2,
+    "abs": 3,
+    "abs,x": 3,
+    "abs,y": 3,
+    "iz,x": 2,
+    "iz,y": 2,
+    "ind": 3,
+    "r": 2,
+}
+
 OPCODES = (
     Opcode("BRK", {"_": 0x00}),
     Opcode("ORA", {
@@ -204,11 +222,16 @@ def is_illegal(x):
     return int(ILLEGAL[x])
 
 
+def first_mode(opcode, mode):
+    mode = opcode.modes[mode]
+    return mode[0] if type(mode) is list else mode
+
+
 def compare_output():
     global OPCODES
     for op in OPCODES:
         for mode, v in op.modes.items():
-            for i in range(1 if type(v) is not list else len(v)):
+            for i in range(len(v) if type(v) is list else 1):
                 # the only non-mnemonic alias
                 if op.mnemonic == "LAX" and mode == "#":
                     continue
@@ -240,7 +263,8 @@ def main():
     for x in range(256):
         found = False
         for op in OPCODES:
-            for m in op.modes.values():
+            for ot, m in op.modes.items():
+                assert(ot in INSTRUCTION_LENGTH)
                 if type(m) is list and x in m or m == x:
                     found = True
                     break
