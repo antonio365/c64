@@ -108,41 +108,41 @@ class Instruction:
         num = None
         label = self.parser.labels.get(self.arg, None)
         if label is not None:
-            num = self.parser.blocks[-1].get("org", 0) + label
-        else:
-            try:
-                use_long, num = parse_num(self.arg, True)
-            except ValueError:
-                num = 0
-                use_long = True
-                if self.arg not in self.parser.forward_labels:
-                    self.parser.forward_labels[self.arg] = []
-                self.parser.forward_labels[self.arg].append({
-                    "block": len(self.parser.blocks) - 1,
-                    "offset": self.parser.offset,
-                    "mode": "abs",
-                })
+            return self.parser.blocks[-1]["org"] + label, True
+        try:
+            use_long, num = parse_num(self.arg, True)
+        except ValueError:
+            num = 0
+            use_long = True
+            if self.arg not in self.parser.forward_labels:
+                self.parser.forward_labels[self.arg] = []
+            self.parser.forward_labels[self.arg].append({
+                "block": len(self.parser.blocks) - 1,
+                "offset": self.parser.offset,
+                "mode": "abs",
+            })
         if return_use_long:
             return use_long, num
         return num
 
-
     def relative(self):
         j = -2
-        if self.arg in self.parser.labels:
+        label = self.parser.labels.get(self.arg, None)
+        if label is not None:
             j += self.parser.labels[self.arg] - self.parser.offset
-        else:
-            try:
-                j += self.parser.blocks[-1].get("org", 0) + parse_num(self.arg)
-            except ValueError:
-                j += 2
-                if self.arg not in self.parser.forward_labels:
-                    self.parser.forward_labels[self.arg] = []
-                self.parser.forward_labels[self.arg].append({
-                    "block": len(self.parser.blocks) - 1,
-                    "offset": self.parser.offset,
-                    "mode": "r",
-                })
+            assert(j > -129 and j < 128)
+            return lo(j)
+        try:
+            j += self.parser.blocks[-1]["org"] + parse_num(self.arg)
+        except ValueError:
+            j += 2
+            if self.arg not in self.parser.forward_labels:
+                self.parser.forward_labels[self.arg] = []
+            self.parser.forward_labels[self.arg].append({
+                "block": len(self.parser.blocks) - 1,
+                "offset": self.parser.offset,
+                "mode": "r",
+            })
         assert(j > -129 and j < 128)
         return lo(j)
 
@@ -194,7 +194,7 @@ class MOS6502Parser:
             if fwl["mode"] == "r":
                 data[fwl["offset"] + 1] = len(data) - fwl["offset"] - 2
             elif fwl["mode"] == "abs":
-                addr = self.blocks[fwl["block"]].get("org", 0) + len(data)
+                addr = self.blocks[fwl["block"]]["org"] + len(data)
                 data[fwl["offset"] + 1] = lo(addr)
                 data[fwl["offset"] + 2] = hi(addr)
 
@@ -226,27 +226,18 @@ class MOS6502Parser:
                 return
 
     def write(self, fh):
-        org = None
         offset = 0
-        # every block but the first must start at a known address
-        # - only .org <address> starts a block
-        for block in self.blocks:
-            if "org" in block:
-                block["org"] = block["org"] & 0xffff
-                if org is None:
-                    org = block["org"] - offset
-            offset += len(block["data"])
-        current = 0
-        if org is not None:
-            self.blocks[0]["org"] = org
-            fh.write(bytes(bytearray((lo(org), hi(org)))))
-            current = org
+        current = self.blocks[0]["org"]
+        fh.write(bytes(bytearray((
+            lo(self.blocks[0]["org"]),
+            hi(self.blocks[0]["org"]),
+        ))))
         self.blocks = sorted(self.blocks, key=lambda block: block["org"])
-        for i, block in enumerate(self.blocks):
-            assert(self.blocks[i]["org"] >= current)
+        for block in self.blocks:
+            assert(block["org"] >= current)
             # add padding between blocks
-            if self.blocks[i]["org"] > current:
-                fh.write(b"\0" * (self.blocks[i]["org"] - current))
+            if block["org"] > current:
+                fh.write(b"\0" * (block["org"] - current))
             fh.write(block["data"])
             current += len(block["data"])
 
