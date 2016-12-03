@@ -84,11 +84,11 @@ class Instruction:
     def adjust(self):
         if self.len == 1:
             return self.inst,
-        if self.len == 2:
+        elif self.len == 2:
             return self.inst, self.num
         elif self.len == 3:
             return self.inst, lo(self.num), hi(self.num)
-        raise ValueError("{}".format(self.mnemonic))
+        raise ValueError(str(self))
 
     def parse(self):
         if self.mode is None:
@@ -108,17 +108,18 @@ class Instruction:
         num = None
         label = self.parser.labels.get(self.arg, None)
         if label is not None:
-            return self.parser.blocks[-1]["org"] + label, True
+            num = self.parser.org + label
+            use_long = True
         try:
-            use_long, num = parse_num(self.arg, True)
+            if num is None:
+                use_long, num = parse_num(self.arg, True)
         except ValueError:
             num = 0
             use_long = True
             if self.arg not in self.parser.forward_labels:
                 self.parser.forward_labels[self.arg] = []
             self.parser.forward_labels[self.arg].append({
-                "block": len(self.parser.blocks) - 1,
-                "offset": self.parser.offset,
+                "offset": len(self.parser.output),
                 "mode": "abs",
             })
         if return_use_long:
@@ -126,21 +127,21 @@ class Instruction:
         return num
 
     def relative(self):
-        j = -2
+        j = None
         label = self.parser.labels.get(self.arg, None)
         if label is not None:
-            j += self.parser.labels[self.arg] - self.parser.offset
+            j = self.parser.labels[self.arg] - len(self.parser.output) - 2
             assert(j > -129 and j < 128)
             return lo(j)
         try:
-            j += self.parser.blocks[-1]["org"] + parse_num(self.arg)
+            if j is None:
+                j = self.parser.org + parse_num(self.arg) - 2
         except ValueError:
-            j += 2
+            j = 0
             if self.arg not in self.parser.forward_labels:
                 self.parser.forward_labels[self.arg] = []
             self.parser.forward_labels[self.arg].append({
-                "block": len(self.parser.blocks) - 1,
-                "offset": self.parser.offset,
+                "offset": len(self.parser.output),
                 "mode": "r",
             })
         assert(j > -129 and j < 128)
@@ -164,23 +165,21 @@ class MOS6502Parser:
 
     def __init__(self, infh, warn_illegal):
         self.warn_illegal = warn_illegal
-        self.blocks = []
+        self.org = None
+        self.output = bytearray()
         self.labels = {}
         self.forward_labels = {}
-        self.offset = 0
         for line in infh.readlines():
             for cc in self.comment_chars:
                 comment = line.find(cc)
                 if comment >= 0:
                     line = line[:comment]
-            self.offset = len(self.blocks[-1]["data"]) \
-                if len(self.blocks) else 0
             colon = line.find(":")
             if colon >= 0:
                 # todo: remove label from beginning of line
                 label, line = line.split(":", 1)
                 label = label.strip()
-                self.labels[label] = len(self.blocks[-1]["data"])
+                self.labels[label] = len(self.output)
                 if label in self.forward_labels:
                     self.insert_forward_label(self.forward_labels.pop(label))
             line = line.split()
@@ -190,29 +189,32 @@ class MOS6502Parser:
 
     def insert_forward_label(self, forward_labels):
         for fwl in forward_labels:
-            data = self.blocks[fwl["block"]]["data"]
             if fwl["mode"] == "r":
-                data[fwl["offset"] + 1] = len(data) - fwl["offset"] - 2
+                addr = len(self.output) - fwl["offset"] - 2
+                self.output[fwl["offset"] + 1] = addr
             elif fwl["mode"] == "abs":
-                addr = self.blocks[fwl["block"]]["org"] + len(data)
-                data[fwl["offset"] + 1] = lo(addr)
-                data[fwl["offset"] + 2] = hi(addr)
+                addr = self.org + len(self.output)
+                self.output[fwl["offset"] + 1] = lo(addr)
+                self.output[fwl["offset"] + 2] = hi(addr)
 
     def interpret(self, line):
         if line[0].upper().startswith(".ORG"):
             assert(len(line) == 2)
-            self.blocks.append({
-                "org": parse_num(line[1]),
-                "data": bytearray(),
-            })
+            if self.org is None:
+                self.org = parse_num(line[1])
+            else:
+                pad = parse_num(line[1]) - (self.org + len(self.output))
+                assert(pad >= 0)
+                if pad > 0:
+                    self.output.extend(bytearray(pad))
             return
         elif line[0].upper().startswith(".HEX"):
             for x in line[1:]:
                 num = int(x[-4:], 16)
                 if len(x) > 2:
-                    self.blocks[-1]["data"].append(lo(num))
+                    self.output.append(lo(num))
                     num >>= 8
-                self.blocks[-1]["data"].append(num)
+                self.output.append(num)
             return
         assert(len(line) in (1, 2))
         for op in OPCODES:
@@ -222,24 +224,12 @@ class MOS6502Parser:
                 ).parse()
                 if self.warn_illegal and is_illegal(inst[0]):
                     warn("illegal opcode: {}[{:02X}]", line[0], inst[0])
-                self.blocks[-1]["data"].extend(*inst)
+                self.output.extend(inst)
                 return
 
     def write(self, fh):
-        offset = 0
-        current = self.blocks[0]["org"]
-        fh.write(bytes(bytearray((
-            lo(self.blocks[0]["org"]),
-            hi(self.blocks[0]["org"]),
-        ))))
-        self.blocks = sorted(self.blocks, key=lambda block: block["org"])
-        for block in self.blocks:
-            assert(block["org"] >= current)
-            # add padding between blocks
-            if block["org"] > current:
-                fh.write(b"\0" * (block["org"] - current))
-            fh.write(block["data"])
-            current += len(block["data"])
+        fh.write(bytes((lo(self.org), hi(self.org))))
+        fh.write(self.output)
 
 
 def warn_arg(ap, name, default=False):
