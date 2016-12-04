@@ -54,8 +54,10 @@ def main():
         return
     with socket(AF_INET, SOCK_STREAM) as sock:
         sock.settimeout(.5)
-        connect_when_available(sock, tuple(parse_address(vice_cmd[-1])), 1)
-        sock.sendall(b"d 080d 0828\n")
+        connect_when_available(sock, tuple(parse_address(vice_cmd[-1])), .5)
+        sock.sendall(b"d 080d 0819\n")
+        print(filter_prompt(readall(sock).decode()))
+        sock.sendall(b"d 0830 083b\n")
         print(filter_prompt(readall(sock).decode()))
         sock.sendall(b"m 0900 0908\n")
         print(filter_prompt(readall(sock).decode()))
